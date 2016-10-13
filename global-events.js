@@ -6,6 +6,76 @@ module.exports = function (window) {
         Event = ITSA.Event,
         RESIZE_MARGIN = 5;
 
+    Event.after('tap', function(e) {
+        var node = e.target,
+            element = node.inside('i-table'),
+            model = element.model,
+            rowsSelectable = model['rows-selectable'].toLowerCase(),
+            prevValue, newValue, dataIndex, prevValueArray, min, max;
+        if ((rowsSelectable==='true') || (rowsSelectable==='multiple')) {
+            // cleanup = (rowsSelectable==='true') || (!ctrl);
+            // cleanup && element.getAll('section.i-table-row.selected').removeClass('selected');
+            // node.setClass('selected');
+            dataIndex = parseInt(node.getAttr('data-index'), 10);
+            prevValue = String(model['rows-selected']) || '[]';
+            if (e.shiftKey) {
+                if (prevValue.startsWith('\\[')) {
+                    // array
+                    try {
+                        prevValueArray = JSON.parse(prevValue);
+                    }
+                    catch(e) {
+                        prevValueArray = [];
+                    }
+                    if (prevValueArray.length>0) {
+                        min = Math.min.apply(null, prevValueArray);
+                        max = Math.max.apply(null, prevValueArray);
+                    }
+                }
+                else {
+                    min = max = parseInt(prevValue, 10);
+                    prevValueArray = [min];
+                }
+                if (typeof min==='number') {
+                    while (dataIndex<min) {
+                        prevValueArray.push(--min);
+                    }
+                }
+                if (typeof max==='number') {
+                    while (dataIndex>max) {
+                        prevValueArray.push(++max);
+                    }
+                }
+                newValue = (prevValueArray.length>1) ? '['+String(prevValueArray)+']' : dataIndex;
+            }
+            else {
+                newValue = dataIndex;
+            }
+
+            if (prevValue!=newValue) {
+                model['rows-selected'] = newValue;
+                element.forceSync();
+                /**
+                * Emitted when a the i-select changes its value
+                *
+                * @event i-table:rowselect
+                * @param e {Object} eventobject including:
+                * @param e.target {HtmlElement} the i-select element
+                * @param e.prevValue {Number} the selected item, starting with 1
+                * @param e.newValue {Number} the selected item, starting with 1
+                * @param e.buttonText {String} the text that will appear on the button
+                * @param e.listText {String} the text as it is in the list
+                * @since 0.1
+                */
+                element.emit('rowselect', {
+                    prevValue: prevValue,
+                    newValue: newValue,
+                    node: node
+                });
+            }
+        }
+    }, 'i-table[rows-selectable] section.i-table-row');
+
     Event.after('mouseover', function(e) {
         var node = e.target,
             itable = node.getParent();
@@ -198,11 +268,12 @@ module.exports = function (window) {
             colIndex = rowNode.vnode.vChildNodes.indexOf(cellNode.vnode),
             itable = rowNode.inside('i-table'),
             model = itable.model;
-        model.editCell = {col: colIndex, row: rowIndex};
         // also mark this specific element as being `editing`: we do not want to share
         // editing features accross multiple itags that share the same model:
-        itable.setClass('editing', true);
-    }, 'i-table section[is="td"]');
+        itable.setData('_editing', true);
+        model.editCell = {col: colIndex, row: rowIndex};
+        itable.forceSync();
+    }, 'i-table[editable="true"] section[is="td"]');
 
     Event.after('nodeinsert', function(e) {
         var inputNode = e.target;
@@ -220,7 +291,7 @@ module.exports = function (window) {
             modelitems = itable.getItems(tdNode),
             property = tdNode.getAttr('prop'),
             newValue = inputNode.getValue(),
-            validValue;
+            validValue, prevValue;
 
         // first determine the previous `type` --> we need the same type after changing!
         switch (typeof modelitems[rowIndex][property]) {
@@ -242,10 +313,30 @@ module.exports = function (window) {
             default:
                 validValue = true;
         }
-        // now we have `newValue` in its true type. We can set it now:
-        validValue && (modelitems[rowIndex][property]=newValue);
         delete itable.model.editCell;
-        itable.removeClass('editing');
+        itable.removeData('_editing');
+        // now we have `newValue` in its true type. We can set it now:
+        if (validValue) {
+            prevValue = modelitems[rowIndex][property];
+            modelitems[rowIndex][property] = newValue;
+            itable.forceSync();
+            /**
+            * Emitted when a the i-select changes its value
+            *
+            * @event i-table:rowselect
+            * @param e {Object} eventobject including:
+            * @param e.target {HtmlElement} the i-table element
+            * @since 0.1
+            */
+            itable.emit('itemchange', {
+                item: modelitems[rowIndex],
+                prevValue: prevValue,
+                newValue: newValue,
+                row: rowIndex,
+                property: property,
+                node: tdNode
+            });
+        }
     }, 'i-table input');
 
     Event.after('keypress', function(e) {

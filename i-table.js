@@ -16,39 +16,6 @@ module.exports = function (window) {
 
         require('./global-events.js')(window);
 
-        Event.after('tap', function(e) {
-            var node = e.target,
-                element = node.inside('i-table'),
-                model = element.model,
-                prevValue, newValue;
-            if (model['rows-selectable'].toLowerCase()==='true') {
-                element.getAll('section.i-table-row.selected').removeClass('selected');
-                node.setClass('selected');
-                newValue = node.getAttr('data-index');
-                prevValue = model['rows-selected'];
-                if (prevValue!==newValue) {
-                    model['rows-selected'] = newValue;
-                    /**
-                    * Emitted when a the i-select changes its value
-                    *
-                    * @event i-select:valuechange
-                    * @param e {Object} eventobject including:
-                    * @param e.target {HtmlElement} the i-select element
-                    * @param e.prevValue {Number} the selected item, starting with 1
-                    * @param e.newValue {Number} the selected item, starting with 1
-                    * @param e.buttonText {String} the text that will appear on the button
-                    * @param e.listText {String} the text as it is in the list
-                    * @since 0.1
-                    */
-                    element.emit('rowselect', {
-                        prevValue: prevValue,
-                        newValue: newValue,
-                        node: node
-                    });
-                }
-            }
-        }, 'i-table[rows-selectable] section.i-table-row');
-
         Itag = IScroller.subClass(itagName, {
 
             init: function() {
@@ -82,6 +49,8 @@ module.exports = function (window) {
             getDirection: function() {
                 return 'xy';
             },
+
+            delayedSync: true,
 
             cloneItems: function() {
                 // overrule `cloneItems` --> not only need they to be cloned, they might also need to be sorted
@@ -170,6 +139,22 @@ module.exports = function (window) {
                 }
             },
 
+            scrollToBottom: function() {
+                var element = this,
+                    scrollContainer = element.getData('_scrollContainer'),
+                    fixedHeaderNode = element.getData('_fixedHeaderNode'),
+                    firstChild = scrollContainer.getElement('>section'),
+                    bottomcontainer = element.getElement('>section >section[container="third"]'),
+                    height = firstChild ? firstChild.height : 19,
+                    visibleItems = (element.height - fixedHeaderNode.height)/height,
+                    itemNr = Math.max(0, element.model.items.length - visibleItems);
+                //expierienced timing problems --> therefoe going async
+                ITSA.async(function() {
+                    element.model['start-item'] = itemNr;
+                    element.forceSync();
+                });
+            },
+
             removeListeners: function() {
                 var element = this,
                     listener = element.getData('_headerMoveListener');
@@ -224,6 +209,7 @@ module.exports = function (window) {
                 // set element css:
                 element.addSystemElement(css, false, true);
                 element.$superProp('render');
+                element.plug('tablescroll', {'scroll-light': true});
                 element.setAttr('i-id', element.uniqueId);
                 // fixedheadernode is only available after render of iscroller:
                 fixedHeaderNode = element.getData('_fixedHeaderNode');
@@ -331,11 +317,7 @@ module.exports = function (window) {
                     scrollContainer, maxHeight, vRowChildNodes, vRowChildNode, len, i, vCellNodes, vCellChildNode, j, len2;
 
                 element.model.columns.sameValue(prevColDef) || element.syncCols();
-
-
                 element.model.items.sameValue(prevItemsDef) || element.cloneItems();
-
-
                 element.$superProp('sync');
                 if (ITSA.UA.isIE && ITSA.UA.ieVersion<10) {
                     // we need to calculate the height of each cell of every row and set the max-height as inline height
@@ -360,6 +342,9 @@ module.exports = function (window) {
                         }
                     }
                 }
+                element.getPlugin('tablescroll').then(function(plugin) {
+                    plugin.sync();
+                });
             },
 
             getCellContent: function(item, col) {
@@ -400,7 +385,7 @@ module.exports = function (window) {
                     console.warn('table item is no object!');
                     return;
                 }
-                if (rowSelectedClass) {
+                if (rowSelectedClass || (rowSelectedClass===0)) {
                     if (rowSelectedClass[0]==='[') {
                         try {
                             rowSelectedClass = JSON.parse(rowSelectedClass);
@@ -442,8 +427,8 @@ module.exports = function (window) {
                     model = element.model,
                     editCell = model.editCell,
                     content, data;
-                if (editCell && element.hasClass('editing') && (editCell.col===colIndex) && (editCell.row===rowIndex)) {
-                    content = '<input value="'+(oneItem[col.key] || '')+'" />';
+                if (editCell && element.getData('_editing') && (editCell.col===colIndex) && (editCell.row===rowIndex)) {
+                    content = '<input type="text" value="'+(oneItem[col.key] || '')+'" />';
                     data = (attributeData ? (' '+attributeData) : '') + ' data-editing="true"';
                 }
                 else {
@@ -468,7 +453,7 @@ module.exports = function (window) {
                 var returnValue;
                 if (formatter) {
                     if (formatter.indexOf('<%')!==-1) {
-                        returnValue = microtemplate(formatter, item);
+                        returnValue = microtemplate(formatter, item) || '';
                     }
                     else if (/{\S+}/.test(formatter)) {
                         returnValue = formatter.substitute(item);

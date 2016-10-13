@@ -213,7 +213,7 @@ i-table span[is="th"] {
 
 i-table section[is="thead"].col-dragging span[is="th"],
 i-table span.copy-node span[is="th"] {
-    cursor: move;
+    cursor: default;
 }
 
 i-table section[is="thead"] span:first-child span[is="th"],
